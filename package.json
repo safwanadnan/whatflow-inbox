@@ -1,0 +1,17 @@
+{
+  "name": "whatflow-inbox",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @whatflow/api\" \"npm run dev --workspace @whatflow/web\"",
+    "build": "npm run build --workspace @whatflow/api && npm run build --workspace @whatflow/web",
+    "start": "npm run start --workspace @whatflow/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,213 @@
+:root {
+  font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #f5efe5;
+  background:
+    radial-gradient(circle at top left, rgba(244, 133, 80, 0.2), transparent 30%),
+    radial-gradient(circle at top right, rgba(71, 157, 126, 0.18), transparent 28%),
+    linear-gradient(160deg, #11120f 0%, #1e221b 42%, #283128 100%);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: transparent;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar,
+.workspace {
+  padding: 24px;
+}
+
+.sidebar {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(20px);
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+  color: #f0b16d;
+  margin: 0 0 8px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 2.3rem;
+  line-height: 0.95;
+}
+
+.lede {
+  color: rgba(245, 239, 229, 0.72);
+  max-width: 60ch;
+}
+
+.panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 19, 15, 0.68);
+  border-radius: 24px;
+  padding: 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.conversation-list,
+.token-list,
+.message-list,
+.stack,
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.conversation-card,
+.token,
+.bubble {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px;
+}
+
+.conversation-card {
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-card.active {
+  border-color: rgba(240, 177, 109, 0.7);
+  background: rgba(240, 177, 109, 0.12);
+}
+
+.conversation-card span,
+.conversation-card small,
+.token span,
+.token small,
+.bubble small {
+  display: block;
+  color: rgba(245, 239, 229, 0.7);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.message-list {
+  min-height: 360px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.bubble.incoming {
+  border-left: 4px solid #f0b16d;
+}
+
+.bubble.outgoing {
+  border-left: 4px solid #69c099;
+}
+
+.bubble.status {
+  border-left: 4px solid #7ca4ff;
+}
+
+.composer textarea,
+.config-form input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 12px 14px;
+}
+
+.composer textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+button,
+.ghost-link {
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(120deg, #f0b16d, #f48550);
+  color: #1d140c;
+  padding: 12px 16px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ghost-link {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f5efe5;
+}
+
+.empty {
+  color: rgba(245, 239, 229, 0.58);
+}
+
+.error-banner {
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(255, 99, 71, 0.18);
+  border: 1px solid rgba(255, 99, 71, 0.35);
+}
+
+@media (max-width: 960px) {
+  .shell,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .message-list {
+    max-height: 40vh;
+  }
+}
