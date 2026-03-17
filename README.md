@@ -1,6 +1,6 @@
 # Whatflow Inbox
 
-Whatflow is a self-hostable WhatsApp inbox shaped after the parts of Chatwoot that matter for a WhatsApp-only team: inbox setup, contacts, conversations, messages, templates, phone numbers, webhook intake, and an escape hatch proxy for the rest of the Meta Cloud API.
+Whatflow is a self-hostable WhatsApp inbox shaped after the parts of Chatwoot that matter for a WhatsApp-only team: admin setup, accounts, agents, inbox creation, embedded signup, contacts, conversations, messages, templates, phone numbers, webhook intake, and an escape hatch proxy for the rest of the Meta Cloud API.
 
 This initial scaffold wraps the Meta Cloud API in two ways:
 
@@ -9,8 +9,10 @@ This initial scaffold wraps the Meta Cloud API in two ways:
 
 ## What is included
 
-- Node/Express API with local JSON persistence
+- Node/Express API with Prisma and PostgreSQL
 - Meta Cloud API config and wrapper endpoints
+- Admin-managed Meta Embedded Signup settings
+- Workspace accounts and agent management
 - WhatsApp webhook verification and ingestion
 - Conversation/contact/message timeline storage
 - React/Vite inbox UI
@@ -38,25 +40,38 @@ copy apps\api\.env.example apps\api\.env
 copy apps\web\.env.example apps\web\.env
 ```
 
-3. Start both apps:
+3. Start PostgreSQL and create Prisma tables:
+
+```bash
+docker compose up -d postgres
+npx prisma generate
+npx prisma db push
+```
+
+4. Start both apps:
 
 ```bash
 npm run dev
 ```
 
-4. Open the web app at [http://localhost:5173](http://localhost:5173)
+5. Open the web app at [http://localhost:5173](http://localhost:5173)
 
 ## Backend capabilities
 
-- `GET /api/config/meta`: inspect current Meta setup
-- `PUT /api/config/meta`: save Meta credentials and IDs
+- `GET /api/admin/meta-app`: inspect shared Meta Embedded Signup config
+- `PUT /api/admin/meta-app`: save shared Meta app credentials
+- `POST /api/accounts`: create a workspace account
+- `POST /api/accounts/:accountId/agents`: create account-level agents
+- `POST /api/inboxes`: create manual or draft embedded inboxes
+- `POST /api/inboxes/embedded/exchange`: exchange Meta signup code and finalize embedded inbox creation
 - `GET /api/conversations`: list locally stored conversations
 - `GET /api/conversations/:id`: fetch a conversation detail view
 - `POST /api/conversations/:id/messages`: send outbound text messages through Meta
 - `GET /api/resources/phone-numbers`: list WABA phone numbers
 - `GET /api/resources/templates`: list message templates
 - `ALL /api/meta/*`: passthrough proxy for the rest of the Graph API
-- `GET /webhooks/whatsapp`: Meta webhook verification
+- `GET /webhooks/whatsapp`: shared Meta webhook verification
+- `GET /webhooks/whatsapp/:inboxId`: per-inbox webhook verification
 - `POST /webhooks/whatsapp`: incoming webhook ingestion
 
 ## Product direction
@@ -71,6 +86,7 @@ This is deliberately closer to "WhatsApp inbox plus full API wrapper" than a gen
 
 ## Notes
 
-- Data is stored in `apps/api/data/store.json` for now.
+- Data is stored in PostgreSQL through Prisma.
 - The raw Meta proxy is the bridge to complete API coverage while the opinionated UI catches up.
 - The Chatwoot repo is kept only as a product/IA reference, not runtime code.
+- Embedded signup uses the Facebook JavaScript SDK on the frontend and a backend code exchange against Meta OAuth.

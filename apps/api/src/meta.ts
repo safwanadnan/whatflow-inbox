@@ -1,4 +1,13 @@
-import { Inbox, MetaConfig, readStore } from "./store.js";
+import { prisma } from "./db.js";
+
+export type MetaConfig = {
+  accessToken: string;
+  verifyToken: string;
+  graphBaseUrl: string;
+  graphVersion: string;
+  wabaId: string;
+  phoneNumberId: string;
+};
 
 type MetaRequestOptions = {
   path: string;
@@ -9,7 +18,29 @@ type MetaRequestOptions = {
   config?: MetaConfig;
 };
 
-function configFromInbox(inbox: Inbox, fallback: MetaConfig): MetaConfig {
+export async function getMetaConfig() {
+  const config = await prisma.globalMetaConfig.findUniqueOrThrow({ where: { id: "singleton" } });
+  return {
+    accessToken: config.accessToken,
+    verifyToken: config.verifyToken,
+    graphBaseUrl: config.graphBaseUrl,
+    graphVersion: config.graphVersion,
+    wabaId: config.wabaId,
+    phoneNumberId: config.phoneNumberId,
+  };
+}
+
+export async function getAdminMetaAppConfig() {
+  return prisma.adminMetaAppConfig.findUniqueOrThrow({ where: { id: "singleton" } });
+}
+
+export async function getMetaConfigForInbox(inboxId?: string): Promise<MetaConfig> {
+  const fallback = await getMetaConfig();
+  if (!inboxId) return fallback;
+
+  const inbox = await prisma.inbox.findUnique({ where: { id: inboxId } });
+  if (!inbox) return fallback;
+
   return {
     accessToken: inbox.accessToken || fallback.accessToken,
     verifyToken: inbox.verifyToken || fallback.verifyToken,
@@ -20,20 +51,41 @@ function configFromInbox(inbox: Inbox, fallback: MetaConfig): MetaConfig {
   };
 }
 
-export function getMetaConfig() {
-  return readStore().config.meta;
-}
+export async function exchangeEmbeddedSignupCode({
+  code,
+  redirectUri,
+}: {
+  code: string;
+  redirectUri: string;
+}) {
+  const admin = await getAdminMetaAppConfig();
 
-export function getAdminMetaAppConfig() {
-  return readStore().config.adminMetaApp;
-}
+  if (!admin.appId || !admin.appSecret) {
+    throw new Error("Admin Meta app credentials are not configured.");
+  }
 
-export function getMetaConfigForInbox(inboxId?: string): MetaConfig {
-  const store = readStore();
-  const fallback = store.config.meta;
-  if (!inboxId) return fallback;
-  const inbox = store.inboxes.find((item) => item.id === inboxId);
-  return inbox ? configFromInbox(inbox, fallback) : fallback;
+  const response = await fetch(`${admin.graphBaseUrl}/${admin.graphVersion}/oauth/access_token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      client_id: admin.appId,
+      client_secret: admin.appSecret,
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw new Error(typeof payload === "string" ? payload : JSON.stringify(payload));
+  }
+
+  return payload as { access_token?: string; token_type?: string };
 }
 
 export async function metaRequest({
@@ -44,7 +96,7 @@ export async function metaRequest({
   body = null,
   config,
 }: MetaRequestOptions) {
-  const meta = config ?? getMetaConfig();
+  const meta = config ?? (await getMetaConfig());
 
   if (!meta.accessToken) {
     throw new Error("Meta access token is not configured.");

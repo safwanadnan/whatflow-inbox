@@ -1,4 +1,4 @@
-import { updateStore } from "./store.js";
+import { prisma } from "./db.js";
 
 type WebhookPayload = {
   entry?: Array<{
@@ -34,106 +34,142 @@ type WebhookPayload = {
 };
 
 function isoFromUnix(value?: string) {
-  if (!value) return new Date().toISOString();
-  return new Date(Number(value) * 1000).toISOString();
+  if (!value) return new Date();
+  return new Date(Number(value) * 1000);
 }
 
-function conversationIdFor(waId: string) {
-  return `wa-${waId}`;
-}
+export async function ingestWebhookPayload(payload: WebhookPayload) {
+  for (const entry of payload.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      const value = change.value;
+      if (!value) continue;
 
-export function ingestWebhookPayload(payload: WebhookPayload) {
-  updateStore((store) => {
-    for (const entry of payload.entry ?? []) {
-      for (const change of entry.changes ?? []) {
-        const value = change.value;
-        if (!value) continue;
-        const matchedInbox =
-          store.inboxes.find((item) => item.phoneNumberId === value.metadata?.phone_number_id) ?? store.inboxes[0];
-        const inboxId = matchedInbox?.id ?? "unassigned";
+      const inbox = value.metadata?.phone_number_id
+        ? await prisma.inbox.findFirst({ where: { phoneNumberId: value.metadata.phone_number_id } })
+        : null;
 
-        for (const contact of value.contacts ?? []) {
-          if (!contact.wa_id) continue;
-          const existing = store.contacts.find((item) => item.waId === contact.wa_id);
-          if (!existing) {
-            store.contacts.push({
-              id: `contact-${contact.wa_id}`,
-              waId: contact.wa_id,
-              name: contact.profile?.name ?? contact.wa_id,
-              profileName: contact.profile?.name,
-            });
-          } else if (contact.profile?.name) {
-            existing.name = contact.profile.name;
-            existing.profileName = contact.profile.name;
-          }
-        }
+      if (!inbox) continue;
 
-        for (const message of value.messages ?? []) {
-          if (!message.from || !message.id) continue;
-          const conversationId = conversationIdFor(`${inboxId}-${message.from}`);
-          const contactId = `contact-${message.from}`;
-          const timestamp = isoFromUnix(message.timestamp);
-          const text = message.text?.body ?? `[${message.type ?? "message"}]`;
-          const existingConversation = store.conversations.find((item) => item.id === conversationId);
+      for (const contact of value.contacts ?? []) {
+        if (!contact.wa_id) continue;
+        await prisma.contact.upsert({
+          where: { waId: contact.wa_id },
+          update: {
+            name: contact.profile?.name ?? contact.wa_id,
+            profileName: contact.profile?.name,
+          },
+          create: {
+            waId: contact.wa_id,
+            name: contact.profile?.name ?? contact.wa_id,
+            profileName: contact.profile?.name,
+          },
+        });
+      }
 
-          if (!existingConversation) {
-            const contact = store.contacts.find((item) => item.id === contactId);
-            store.conversations.push({
-              id: conversationId,
-              inboxId,
+      for (const message of value.messages ?? []) {
+        if (!message.from || !message.id) continue;
+        const contact = await prisma.contact.upsert({
+          where: { waId: message.from },
+          update: {},
+          create: {
+            waId: message.from,
+            name: message.from,
+          },
+        });
+
+        const timestamp = isoFromUnix(message.timestamp);
+        const text = message.text?.body ?? `[${message.type ?? "message"}]`;
+
+        const existingConversation = await prisma.conversation.findFirst({
+          where: {
+            inboxId: inbox.id,
+            waId: message.from,
+          },
+        });
+
+        const conversation =
+          existingConversation ??
+          (await prisma.conversation.create({
+            data: {
+              inboxId: inbox.id,
               waId: message.from,
-              title: contact?.name ?? message.from,
+              title: contact.name,
               phoneNumberId: value.metadata?.phone_number_id,
               lastMessageAt: timestamp,
               lastMessagePreview: text,
-              unreadCount: 1,
-              contactId,
-              status: "open",
-            });
-          } else {
-            existingConversation.lastMessageAt = timestamp;
-            existingConversation.lastMessagePreview = text;
-            existingConversation.unreadCount += 1;
-            existingConversation.phoneNumberId = value.metadata?.phone_number_id ?? existingConversation.phoneNumberId;
-          }
+              unreadCount: 0,
+              contactId: contact.id,
+            },
+          }));
 
-          const exists = store.messages.some((item) => item.id === message.id);
-          if (!exists) {
-            store.messages.push({
-              id: message.id,
-              conversationId,
-              waId: message.from,
-              inboxId,
-              type: message.type ?? "unknown",
-              direction: "incoming",
-              text,
-              raw: message,
-              timestamp,
-            });
-          }
-        }
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            title: contact.name,
+            phoneNumberId: value.metadata?.phone_number_id,
+            lastMessageAt: timestamp,
+            lastMessagePreview: text,
+            unreadCount: { increment: 1 },
+          },
+        });
 
-        for (const status of value.statuses ?? []) {
-          if (!status.id || !status.recipient_id) continue;
-          const conversationId = conversationIdFor(`${inboxId}-${status.recipient_id}`);
-          const message = store.messages.find((item) => item.id === status.id);
-          if (message) {
-            message.status = status.status;
-          } else {
-            store.messages.push({
+        await prisma.message.upsert({
+          where: { id: message.id },
+          update: {
+            text,
+            rawJson: message,
+            timestamp,
+          },
+          create: {
+            id: message.id,
+            conversationId: conversation.id,
+            waId: message.from,
+            inboxId: inbox.id,
+            type: message.type ?? "unknown",
+            direction: "incoming",
+            text,
+            rawJson: message,
+            timestamp,
+          },
+        });
+      }
+
+      for (const status of value.statuses ?? []) {
+        if (!status.id || !status.recipient_id) continue;
+
+        const conversation = await prisma.conversation.findFirst({
+          where: {
+            inboxId: inbox.id,
+            waId: status.recipient_id,
+          },
+        });
+
+        if (!conversation) continue;
+
+        const existingMessage = await prisma.message.findUnique({ where: { id: status.id } });
+        if (existingMessage) {
+          await prisma.message.update({
+            where: { id: status.id },
+            data: {
+              status: status.status,
+            },
+          });
+        } else {
+          await prisma.message.create({
+            data: {
               id: status.id,
-              conversationId,
+              conversationId: conversation.id,
               waId: status.recipient_id,
-              inboxId,
+              inboxId: inbox.id,
               type: "status",
               direction: "status",
-              raw: status,
+              rawJson: status,
               timestamp: isoFromUnix(status.timestamp),
               status: status.status,
-            });
-          }
+            },
+          });
         }
       }
     }
-  });
+  }
 }

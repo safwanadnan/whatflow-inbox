@@ -9,9 +9,13 @@
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace @whatflow/api\" \"npm run dev --workspace @whatflow/web\"",
     "build": "npm run build --workspace @whatflow/api && npm run build --workspace @whatflow/web",
-    "start": "npm run start --workspace @whatflow/api"
+    "start": "npm run start --workspace @whatflow/api",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "prisma": "^6.6.0"
   }
 }
