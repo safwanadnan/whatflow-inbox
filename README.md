@@ -59,6 +59,15 @@ npm run dev
 
 5. Open the web app at [http://localhost:5173](http://localhost:5173)
 
+## First-run initialization
+
+Whatflow now supports a proper first-run bootstrap flow:
+
+- If no platform admin exists and no env-seeded admin credentials are provided, the app shows a `Create Super Admin` screen on first launch.
+- The first user created there becomes the super admin.
+- If `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` are provided, Whatflow seeds that super admin automatically during bootstrap and skips the first-run signup screen.
+- Env-seeded admin creation only happens when the system is uninitialized. Existing platform users are never overwritten on restart.
+
 ## Container deployment
 
 The default [docker-compose.yaml](C:/Users/safwa/whatflow%20inbox/docker-compose.yaml) runs only the Whatflow app container. This is the production-oriented mode and expects you to bring your own infrastructure through env vars:

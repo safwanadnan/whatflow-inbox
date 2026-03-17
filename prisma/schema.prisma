@@ -7,6 +7,191 @@ datasource db {
   provider = "postgresql"
 }
 
+model AdminMetaAppConfig {
+  id                    String   @id @default("singleton")
+  embeddedSignupEnabled Boolean  @default(false)
+  appId                 String   @default("")
+  appSecret             String   @default("")
+  configurationId       String   @default("")
+  verifyToken           String   @default("")
+  systemUserAccessToken String   @default("")
+  graphBaseUrl          String   @default("https://graph.facebook.com")
+  graphVersion          String   @default("v23.0")
+  webhookCallbackUrl    String   @default("")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model GlobalMetaConfig {
+  id            String   @id @default("singleton")
+  accessToken   String   @default("")
+  verifyToken   String   @default("")
+  graphBaseUrl  String   @default("https://graph.facebook.com")
+  graphVersion  String   @default("v23.0")
+  wabaId        String   @default("")
+  phoneNumberId String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Account {
+  id              String           @id @default(cuid())
+  name            String
+  slug            String           @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  agents          Agent[]
+  cannedResponses CannedResponse[]
+  inboxes         Inbox[]
+  labels          Label[]
+}
+
+model Agent {
+  id                    String         @id @default(cuid())
+  accountId             String
+  name                  String
+  email                 String
+  passwordHash          String         @default("")
+  role                  AgentRole      @default(agent)
+  isActive              Boolean        @default(true)
+  lastLoginAt           DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  account               Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  assignedConversations Conversation[] @relation("ConversationAssignee")
+  notes                 Note[]
+
+  @@unique([accountId, email])
+}
+
+model PlatformUser {
+  id           String       @id @default(cuid())
+  name         String
+  email        String       @unique
+  passwordHash String
+  role         PlatformRole @default(owner)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  lastLoginAt  DateTime?
+}
+
+model Inbox {
+  id                String              @id @default(cuid())
+  accountId         String
+  name              String
+  connectionType    InboxConnectionType
+  status            InboxStatus         @default(draft)
+  phoneNumber       String              @default("")
+  phoneNumberId     String              @default("")
+  businessAccountId String              @default("")
+  accessToken       String              @default("")
+  verifyToken       String              @default("")
+  metaAppId         String              @default("")
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  conversations     Conversation[]
+  account           Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+model Contact {
+  id            String         @id @default(cuid())
+  waId          String         @unique
+  name          String
+  profileName   String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+}
+
+model Conversation {
+  id                 String              @id @default(cuid())
+  inboxId            String
+  waId               String
+  title              String
+  phoneNumberId      String?
+  lastMessageAt      DateTime            @default(now())
+  lastMessagePreview String              @default("")
+  unreadCount        Int                 @default(0)
+  contactId          String
+  assigneeId         String?
+  status             ConversationStatus  @default(open)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  assignee           Agent?              @relation("ConversationAssignee", fields: [assigneeId], references: [id])
+  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  inbox              Inbox               @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+  labels             ConversationLabel[]
+  messages           Message[]
+  notes              Note[]
+
+  @@index([inboxId])
+}
+
+model Message {
+  id             String           @id
+  conversationId String
+  waId           String
+  inboxId        String
+  type           String
+  direction      MessageDirection
+  text           String?
+  rawJson        Json?
+  timestamp      DateTime
+  status         String?
+  createdAt      DateTime         @default(now())
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([inboxId])
+}
+
+model Label {
+  id            String              @id @default(cuid())
+  accountId     String
+  name          String
+  color         String              @default("#f0b16d")
+  description   String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  conversations ConversationLabel[]
+  account       Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, name])
+}
+
+model ConversationLabel {
+  conversationId String
+  labelId        String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  label          Label        @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, labelId])
+}
+
+model Note {
+  id             String       @id @default(cuid())
+  conversationId String
+  authorAgentId  String
+  content        String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  author         Agent        @relation(fields: [authorAgentId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model CannedResponse {
+  id        String   @id @default(cuid())
+  accountId String
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
 enum InboxConnectionType {
   embedded
   manual
@@ -36,189 +221,4 @@ enum AgentRole {
 
 enum PlatformRole {
   owner
-}
-
-model AdminMetaAppConfig {
-  id                    String   @id @default("singleton")
-  embeddedSignupEnabled Boolean  @default(false)
-  appId                 String   @default("")
-  appSecret             String   @default("")
-  configurationId       String   @default("")
-  verifyToken           String   @default("")
-  systemUserAccessToken String   @default("")
-  graphBaseUrl          String   @default("https://graph.facebook.com")
-  graphVersion          String   @default("v23.0")
-  webhookCallbackUrl    String   @default("")
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-}
-
-model GlobalMetaConfig {
-  id           String   @id @default("singleton")
-  accessToken  String   @default("")
-  verifyToken  String   @default("")
-  graphBaseUrl String   @default("https://graph.facebook.com")
-  graphVersion String   @default("v23.0")
-  wabaId       String   @default("")
-  phoneNumberId String  @default("")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
-model Account {
-  id        String        @id @default(cuid())
-  name      String
-  slug      String        @unique
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  agents    Agent[]
-  inboxes   Inbox[]
-  labels    Label[]
-  cannedResponses CannedResponse[]
-}
-
-model Agent {
-  id         String    @id @default(cuid())
-  accountId  String
-  name       String
-  email      String
-  passwordHash String  @default("")
-  role       AgentRole @default(agent)
-  isActive   Boolean   @default(true)
-  lastLoginAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  assignedConversations Conversation[] @relation("ConversationAssignee")
-  notes      Note[]
-
-  @@unique([accountId, email])
-}
-
-model PlatformUser {
-  id           String       @id @default(cuid())
-  name         String
-  email        String       @unique
-  passwordHash String
-  role         PlatformRole @default(owner)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  lastLoginAt  DateTime?
-}
-
-model Inbox {
-  id                String               @id @default(cuid())
-  accountId         String
-  name              String
-  connectionType    InboxConnectionType
-  status            InboxStatus          @default(draft)
-  phoneNumber       String               @default("")
-  phoneNumberId     String               @default("")
-  businessAccountId String               @default("")
-  accessToken       String               @default("")
-  verifyToken       String               @default("")
-  metaAppId         String               @default("")
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  account           Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  conversations     Conversation[]
-
-  @@index([accountId])
-}
-
-model Contact {
-  id          String         @id @default(cuid())
-  waId        String         @unique
-  name        String
-  profileName String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  conversations Conversation[]
-}
-
-model Conversation {
-  id                 String              @id @default(cuid())
-  inboxId            String
-  waId               String
-  title              String
-  phoneNumberId      String?
-  lastMessageAt      DateTime            @default(now())
-  lastMessagePreview String              @default("")
-  unreadCount        Int                 @default(0)
-  contactId          String
-  assigneeId         String?
-  status             ConversationStatus  @default(open)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  inbox              Inbox               @relation(fields: [inboxId], references: [id], onDelete: Cascade)
-  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  messages           Message[]
-  assignee           Agent?              @relation("ConversationAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  notes              Note[]
-  labels             ConversationLabel[]
-
-  @@index([inboxId])
-}
-
-model Message {
-  id             String            @id
-  conversationId String
-  waId           String
-  inboxId        String
-  type           String
-  direction      MessageDirection
-  text           String?
-  rawJson        Json?
-  timestamp      DateTime
-  status         String?
-  createdAt      DateTime          @default(now())
-  conversation   Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
-  @@index([inboxId])
-}
-
-model Label {
-  id          String              @id @default(cuid())
-  accountId   String
-  name        String
-  color       String              @default("#f0b16d")
-  description String?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  account     Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  conversations ConversationLabel[]
-
-  @@unique([accountId, name])
-}
-
-model ConversationLabel {
-  conversationId String
-  labelId        String
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  label          Label        @relation(fields: [labelId], references: [id], onDelete: Cascade)
-
-  @@id([conversationId, labelId])
-}
-
-model Note {
-  id             String       @id @default(cuid())
-  conversationId String
-  authorAgentId  String
-  content        String
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  author         Agent        @relation(fields: [authorAgentId], references: [id], onDelete: Cascade)
-}
-
-model CannedResponse {
-  id        String   @id @default(cuid())
-  accountId String
-  title     String
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
 }

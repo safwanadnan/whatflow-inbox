@@ -35,6 +35,7 @@ type AdminMetaApp = {
 };
 type Bootstrap = { adminMetaApp: AdminMetaApp; accounts: Account[]; inboxes: Inbox[]; conversations: Array<Conversation & { inbox?: Inbox }> };
 type Viewer = { sub: string; type: "platform" | "agent"; role: string; accountId?: string; email: string; name: string };
+type SetupStatus = { isInitialized: boolean; requiresBootstrap: boolean; allowFirstUserSignup: boolean; seededFromEnv: boolean };
 type View = "setup" | "admin" | "inbox";
 
 declare global {
@@ -71,6 +72,7 @@ const defaultAdmin: AdminMetaApp = {
 
 export default function App() {
   const [viewer, setViewer] = useState<Viewer | null>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [view, setView] = useState<View>("setup");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
@@ -87,6 +89,7 @@ export default function App() {
   const [newAccountName, setNewAccountName] = useState("");
   const [agentForm, setAgentForm] = useState({ accountId: "", name: "", email: "", password: "", role: "agent" });
   const [loginForm, setLoginForm] = useState({ email: "", password: "", accountId: "" });
+  const [bootstrapForm, setBootstrapForm] = useState({ name: "", email: "", password: "" });
   const [mode, setMode] = useState<"embedded" | "manual">("embedded");
   const [setupForm, setSetupForm] = useState({
     accountId: "",
@@ -115,6 +118,10 @@ export default function App() {
   }
 
   async function restoreSession() {
+    const status = await request<SetupStatus>("/api/setup/status");
+    setSetupStatus(status);
+    if (!status.isInitialized) return;
+
     const token = localStorage.getItem(authTokenKey);
     if (!token) return;
     try {
@@ -236,6 +243,26 @@ export default function App() {
     }
   }
 
+  async function bootstrapSystem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    try {
+      const data = await request<{ token: string; actor: Viewer }>("/api/setup/bootstrap", {
+        method: "POST",
+        body: JSON.stringify(bootstrapForm),
+      });
+      localStorage.setItem(authTokenKey, data.token);
+      setViewer(data.actor);
+      const status = await request<SetupStatus>("/api/setup/status");
+      setSetupStatus(status);
+      await loadBootstrap();
+      setSuccess("Super admin created.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to bootstrap system");
+    }
+  }
+
   function logout() {
     localStorage.removeItem(authTokenKey);
     setViewer(null);
@@ -324,6 +351,27 @@ export default function App() {
     }
   }
 
+  if (setupStatus?.requiresBootstrap) {
+    return (
+      <div className="shell auth-shell">
+        <main className="workspace auth-workspace">
+          <section className="panel auth-panel">
+            <p className="eyebrow">First Run Setup</p>
+            <h1>Create Super Admin</h1>
+            <p className="lede">No platform admin exists yet. The first user created here becomes the super admin.</p>
+            <form className="config-form" onSubmit={bootstrapSystem}>
+              <label>Name<input value={bootstrapForm.name} onChange={(event) => setBootstrapForm({ ...bootstrapForm, name: event.target.value })} /></label>
+              <label>Email<input value={bootstrapForm.email} onChange={(event) => setBootstrapForm({ ...bootstrapForm, email: event.target.value })} /></label>
+              <label>Password<input type="password" value={bootstrapForm.password} onChange={(event) => setBootstrapForm({ ...bootstrapForm, password: event.target.value })} /></label>
+              <button type="submit">Create Super Admin</button>
+            </form>
+            {error && <div className="error-banner">{error}</div>}
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   if (!viewer) {
     return (
       <div className="shell auth-shell">
@@ -331,7 +379,10 @@ export default function App() {
           <section className="panel auth-panel">
             <p className="eyebrow">Whatflow</p>
             <h1>Sign In</h1>
-            <p className="lede">Use the platform admin credentials or an account agent login.</p>
+            <p className="lede">
+              Use the platform admin credentials or an account agent login.
+              {setupStatus?.seededFromEnv ? " The initial super admin was seeded from environment variables." : ""}
+            </p>
             <form className="config-form" onSubmit={login}>
               <label>Email<input value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
               <label>Password<input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>

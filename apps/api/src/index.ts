@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
-import { prisma, ensureBootstrapData } from "./db.js";
+import { prisma, ensureBootstrapData, getSetupStatus } from "./db.js";
 import {
   comparePassword,
   hashPassword,
@@ -64,6 +64,11 @@ async function verifyWebhookSignature(req: express.Request) {
 }
 
 app.post("/api/auth/login", async (req, res) => {
+  const setup = await getSetupStatus();
+  if (!setup.isInitialized) {
+    return res.status(403).json({ error: "System is not initialized yet. Create the first super admin first." });
+  }
+
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
   const accountId = String(req.body?.accountId ?? "").trim();
@@ -86,6 +91,51 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   res.json({ user: req.sessionUser });
+});
+
+app.get("/api/setup/status", async (_req, res) => {
+  await ensureBootstrapData();
+  res.json(await getSetupStatus());
+});
+
+app.post("/api/setup/bootstrap", async (req, res) => {
+  await ensureBootstrapData();
+  const setup = await getSetupStatus();
+  if (setup.isInitialized) {
+    return res.status(409).json({ error: "System is already initialized." });
+  }
+
+  const name = String(req.body?.name ?? "").trim();
+  const email = String(req.body?.email ?? "").trim().toLowerCase();
+  const password = String(req.body?.password ?? "");
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: "Name, email, and password are required." });
+  }
+
+  const platformUser = await prisma.platformUser.create({
+    data: {
+      name,
+      email,
+      passwordHash: await hashPassword(password),
+    },
+  });
+
+  return res.status(201).json({
+    token: issueToken({
+      sub: platformUser.id,
+      type: "platform",
+      role: platformUser.role,
+      email: platformUser.email,
+      name: platformUser.name,
+    }),
+    actor: {
+      type: "platform",
+      name: platformUser.name,
+      email: platformUser.email,
+      role: platformUser.role,
+    },
+  });
 });
 
 app.get("/api/health", async (_req, res) => {

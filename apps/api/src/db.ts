@@ -1,19 +1,34 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../../../generated/prisma/client.js";
+import * as prismaPkg from "../../../generated/prisma/client.js";
 import bcrypt from "bcryptjs";
+
+const prismaModule = (prismaPkg as any).default ?? prismaPkg;
+const { PrismaClient } = prismaModule;
+
+type PrismaClientInstance = InstanceType<typeof PrismaClient>;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __whatflowPrisma: PrismaClient | undefined;
+  var __whatflowPrisma: PrismaClientInstance | undefined;
+}
+
+const connectionString = process.env.DATABASE_URL ?? "";
+const isAccelerate = connectionString.startsWith("prisma+");
+
+const prismaOptions: any = {
+  log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+};
+
+if (isAccelerate) {
+  prismaOptions.accelerateUrl = connectionString;
+} else {
+  prismaOptions.adapter = new PrismaPg({ connectionString });
 }
 
 export const prisma =
   global.__whatflowPrisma ??
-  new PrismaClient({
-    adapter: new PrismaPg({ connectionString: `${process.env.DATABASE_URL}` }),
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-  });
+  new PrismaClient(prismaOptions);
 
 if (process.env.NODE_ENV !== "production") {
   global.__whatflowPrisma = prisma;
@@ -62,13 +77,29 @@ export async function ensureBootstrapData() {
   }
 
   const platformCount = await prisma.platformUser.count();
-  if (platformCount === 0) {
+  const seedEmail = (process.env.PLATFORM_ADMIN_EMAIL ?? "").trim().toLowerCase();
+  const seedPassword = process.env.PLATFORM_ADMIN_PASSWORD ?? "";
+  if (platformCount === 0 && seedEmail && seedPassword) {
     await prisma.platformUser.create({
       data: {
         name: process.env.PLATFORM_ADMIN_NAME ?? "Whatflow Admin",
-        email: (process.env.PLATFORM_ADMIN_EMAIL ?? "admin@example.com").toLowerCase(),
-        passwordHash: await bcrypt.hash(process.env.PLATFORM_ADMIN_PASSWORD ?? "change-me", 10),
+        email: seedEmail,
+        passwordHash: await bcrypt.hash(seedPassword, 10),
       },
     });
   }
+}
+
+export async function getSetupStatus() {
+  const platformCount = await prisma.platformUser.count();
+  const hasEnvBootstrap = Boolean(
+    (process.env.PLATFORM_ADMIN_EMAIL ?? "").trim() && (process.env.PLATFORM_ADMIN_PASSWORD ?? "").trim(),
+  );
+
+  return {
+    isInitialized: platformCount > 0,
+    requiresBootstrap: platformCount === 0,
+    allowFirstUserSignup: platformCount === 0,
+    seededFromEnv: platformCount > 0 && hasEnvBootstrap,
+  };
 }
