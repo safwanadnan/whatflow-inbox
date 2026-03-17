@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -53,6 +54,17 @@ export async function ensureBootstrapData() {
       data: {
         name: "Default Account",
         slug: "default-account",
+      },
+    });
+  }
+
+  const platformCount = await prisma.platformUser.count();
+  if (platformCount === 0) {
+    await prisma.platformUser.create({
+      data: {
+        name: process.env.PLATFORM_ADMIN_NAME ?? "Whatflow Admin",
+        email: (process.env.PLATFORM_ADMIN_EMAIL ?? "admin@example.com").toLowerCase(),
+        passwordHash: await bcrypt.hash(process.env.PLATFORM_ADMIN_PASSWORD ?? "change-me", 10),
       },
     });
   }

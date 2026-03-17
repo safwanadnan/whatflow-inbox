@@ -54,6 +54,20 @@ button {
   gap: 18px;
 }
 
+.auth-shell {
+  grid-template-columns: 1fr;
+}
+
+.auth-workspace {
+  min-height: 100vh;
+  justify-content: center;
+  align-items: center;
+}
+
+.auth-panel {
+  width: min(520px, 100%);
+}
+
 .brand-block {
   margin-bottom: 20px;
 }

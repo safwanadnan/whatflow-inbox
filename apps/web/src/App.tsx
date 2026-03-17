@@ -1,9 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+const authTokenKey = "whatflow_token";
 
 type Agent = { id: string; accountId: string; name: string; email: string; role: "admin" | "manager" | "agent" };
-type Account = { id: string; name: string; slug: string; agents: Agent[] };
+type Label = { id: string; name: string; color: string };
+type CannedResponse = { id: string; title: string; content: string };
+type Account = { id: string; name: string; slug: string; agents: Agent[]; labels: Label[]; cannedResponses: CannedResponse[] };
 type Inbox = {
   id: string;
   accountId: string;
@@ -17,7 +20,8 @@ type Inbox = {
 };
 type Conversation = { id: string; inboxId: string; title: string; lastMessagePreview: string; unreadCount: number; inbox?: Inbox };
 type Message = { id: string; type: string; direction: "incoming" | "outgoing" | "status"; text?: string; timestamp: string; status?: string };
-type ConversationDetail = { conversation: Conversation; inbox?: Inbox; contact?: { name: string }; messages: Message[] };
+type Note = { id: string; content: string; author: { name: string } };
+type ConversationDetail = { conversation: Conversation; inbox?: Inbox; contact?: { name: string }; messages: Message[]; notes?: Note[]; labels?: Label[]; assignee?: { id: string; name: string } | null };
 type AdminMetaApp = {
   embeddedSignupEnabled: boolean;
   appId: string;
@@ -30,6 +34,7 @@ type AdminMetaApp = {
   webhookCallbackUrl: string;
 };
 type Bootstrap = { adminMetaApp: AdminMetaApp; accounts: Account[]; inboxes: Inbox[]; conversations: Array<Conversation & { inbox?: Inbox }> };
+type Viewer = { sub: string; type: "platform" | "agent"; role: string; accountId?: string; email: string; name: string };
 type View = "setup" | "admin" | "inbox";
 
 declare global {
@@ -43,8 +48,9 @@ declare global {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem(authTokenKey);
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...init,
   });
   if (!response.ok) throw new Error(await response.text());
@@ -64,6 +70,7 @@ const defaultAdmin: AdminMetaApp = {
 };
 
 export default function App() {
+  const [viewer, setViewer] = useState<Viewer | null>(null);
   const [view, setView] = useState<View>("setup");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
@@ -78,7 +85,8 @@ export default function App() {
   const [embeddedCode, setEmbeddedCode] = useState("");
   const [sessionInfo, setSessionInfo] = useState("");
   const [newAccountName, setNewAccountName] = useState("");
-  const [agentForm, setAgentForm] = useState({ accountId: "", name: "", email: "", role: "agent" });
+  const [agentForm, setAgentForm] = useState({ accountId: "", name: "", email: "", password: "", role: "agent" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "", accountId: "" });
   const [mode, setMode] = useState<"embedded" | "manual">("embedded");
   const [setupForm, setSetupForm] = useState({
     accountId: "",
@@ -106,8 +114,20 @@ export default function App() {
     setDetail(await request<ConversationDetail>(`/api/conversations/${id}`));
   }
 
+  async function restoreSession() {
+    const token = localStorage.getItem(authTokenKey);
+    if (!token) return;
+    try {
+      const data = await request<{ user: Viewer }>("/api/auth/me");
+      setViewer(data.user);
+      await loadBootstrap();
+    } catch {
+      localStorage.removeItem(authTokenKey);
+    }
+  }
+
   useEffect(() => {
-    void loadBootstrap().catch((err: Error) => setError(err.message));
+    void restoreSession().catch((err: Error) => setError(err.message));
   }, []);
 
   useEffect(() => {
@@ -190,12 +210,39 @@ export default function App() {
     setSuccess("");
     try {
       await request(`/api/accounts/${agentForm.accountId}/agents`, { method: "POST", body: JSON.stringify(agentForm) });
-      setAgentForm((current) => ({ ...current, name: "", email: "", role: "agent" }));
+      setAgentForm((current) => ({ ...current, name: "", email: "", password: "", role: "agent" }));
       await loadBootstrap();
       setSuccess("Agent created.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create agent");
     }
+  }
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    try {
+      const data = await request<{ token: string; actor: Viewer }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify(loginForm),
+      });
+      localStorage.setItem(authTokenKey, data.token);
+      setViewer(data.actor);
+      await loadBootstrap();
+      setSuccess("Logged in.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to log in");
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem(authTokenKey);
+    setViewer(null);
+    setAccounts([]);
+    setInboxes([]);
+    setConversations([]);
+    setDetail(null);
   }
 
   async function createManualInbox(event: FormEvent<HTMLFormElement>) {
@@ -277,6 +324,27 @@ export default function App() {
     }
   }
 
+  if (!viewer) {
+    return (
+      <div className="shell auth-shell">
+        <main className="workspace auth-workspace">
+          <section className="panel auth-panel">
+            <p className="eyebrow">Whatflow</p>
+            <h1>Sign In</h1>
+            <p className="lede">Use the platform admin credentials or an account agent login.</p>
+            <form className="config-form" onSubmit={login}>
+              <label>Email<input value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
+              <label>Password<input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>
+              <label>Account ID (optional for agents)<input value={loginForm.accountId} onChange={(event) => setLoginForm({ ...loginForm, accountId: event.target.value })} /></label>
+              <button type="submit">Sign In</button>
+            </form>
+            {error && <div className="error-banner">{error}</div>}
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -284,12 +352,17 @@ export default function App() {
           <p className="eyebrow">Self-hostable WhatsApp Inbox</p>
           <h1>Whatflow</h1>
           <p className="lede">PostgreSQL, Prisma, embedded signup, accounts, and agents.</p>
+          <div className="token">
+            <strong>{viewer.name}</strong>
+            <small>{viewer.email} | {viewer.type} | {viewer.role}</small>
+          </div>
         </div>
         <nav className="nav-stack">
           <button className={`nav-card ${view === "setup" ? "active" : ""}`} onClick={() => setView("setup")}><strong>Create Inbox</strong><span>Embedded or manual</span></button>
           <button className={`nav-card ${view === "admin" ? "active" : ""}`} onClick={() => setView("admin")}><strong>Admin</strong><span>Meta app, accounts, agents</span></button>
           <button className={`nav-card ${view === "inbox" ? "active" : ""}`} onClick={() => setView("inbox")}><strong>Inbox</strong><span>{conversations.length} conversations</span></button>
         </nav>
+        <button onClick={logout}>Sign Out</button>
         <div className="panel">
           <div className="panel-header"><h2>Accounts</h2><span>{accounts.length}</span></div>
           <div className="token-list">
@@ -404,6 +477,7 @@ export default function App() {
                     <label>Account<select value={agentForm.accountId} onChange={(event) => setAgentForm({ ...agentForm, accountId: event.target.value })}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
                     <label>Name<input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
                     <label>Email<input value={agentForm.email} onChange={(event) => setAgentForm({ ...agentForm, email: event.target.value })} /></label>
+                    <label>Password<input type="password" value={agentForm.password} onChange={(event) => setAgentForm({ ...agentForm, password: event.target.value })} /></label>
                     <label>Role<select value={agentForm.role} onChange={(event) => setAgentForm({ ...agentForm, role: event.target.value })}><option value="agent">Agent</option><option value="manager">Manager</option><option value="admin">Admin</option></select></label>
                     <button type="submit">Create Agent</button>
                   </form>
@@ -458,6 +532,9 @@ export default function App() {
                   <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Send a WhatsApp text message" />
                   <button type="submit">Send</button>
                 </form>
+                {detail?.assignee && <div className="token"><strong>Assigned To</strong><small>{detail.assignee.name}</small></div>}
+                {!!detail?.labels?.length && <div className="token"><strong>Labels</strong><small>{detail.labels.map((label) => label.name).join(", ")}</small></div>}
+                {!!detail?.notes?.length && <div className="token"><strong>Notes</strong><small>{detail.notes.map((note) => `${note.author.name}: ${note.content}`).join(" | ")}</small></div>}
               </article>
             </section>
           </>
