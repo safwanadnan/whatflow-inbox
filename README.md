@@ -48,7 +48,7 @@ copy apps\web\.env.example apps\web\.env
 ```bash
 docker compose up -d postgres
 npx prisma generate
-npx prisma db push
+npx prisma migrate dev --name init
 ```
 
 4. Start both apps:
@@ -99,6 +99,7 @@ This is deliberately closer to "WhatsApp inbox plus full API wrapper" than a gen
 ## Notes
 
 - Data is stored in PostgreSQL through Prisma.
+- Prisma is configured through [prisma.config.ts](C:/Users/safwa/whatflow%20inbox/prisma.config.ts) and uses the newer adapter-based PostgreSQL client wiring.
 - The raw Meta proxy is the bridge to complete API coverage while the opinionated UI catches up.
 - The Chatwoot repo is kept only as a product/IA reference, not runtime code.
 - Embedded signup uses the Facebook JavaScript SDK on the frontend and a backend code exchange against Meta OAuth.

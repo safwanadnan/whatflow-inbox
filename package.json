@@ -16,7 +16,12 @@
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.15.5",
     "concurrently": "^9.2.1",
-    "prisma": "^6.6.0"
+    "prisma": "^7.5.0"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.5.0",
+    "@prisma/client": "^7.5.0"
   }
 }
