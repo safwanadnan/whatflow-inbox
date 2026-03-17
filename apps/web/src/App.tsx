@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const authTokenKey = "whatflow_token";
 
 type Agent = { id: string; accountId: string; name: string; email: string; role: "admin" | "manager" | "agent" };

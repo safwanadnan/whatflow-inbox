@@ -1,5 +1,8 @@
 import "dotenv/config";
 import crypto from "node:crypto";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
@@ -26,6 +29,12 @@ const app = express();
 const port = Number(process.env.PORT ?? 3001);
 const upload = multer({ storage: multer.memoryStorage() });
 type AgentRoleInput = "admin" | "manager" | "agent";
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const webDistCandidates = [
+  resolve(currentDir, "../../../../apps/web/dist"),
+  resolve(currentDir, "../../web/dist"),
+];
+const webDistPath = webDistCandidates.find((candidate) => existsSync(candidate));
 
 app.use(cors({ origin: process.env.APP_URL?.split(",") ?? true }));
 app.use("/api/meta", express.raw({ type: "*/*", limit: "20mb" }));
@@ -544,6 +553,13 @@ app.post("/webhooks/whatsapp/:inboxId", async (req, res) => {
   await ingestWebhookPayload(req.body);
   res.status(200).json({ received: true, inboxId: req.params.inboxId });
 });
+
+if (webDistPath) {
+  app.use(express.static(webDistPath));
+  app.get(/^\/(?!api|webhooks).*/, (_req, res) => {
+    res.sendFile(resolve(webDistPath, "index.html"));
+  });
+}
 
 ensureBootstrapData()
   .then(() => {

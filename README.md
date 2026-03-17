@@ -19,7 +19,7 @@ This initial scaffold wraps the Meta Cloud API in two ways:
 - WhatsApp webhook verification and ingestion
 - Conversation/contact/message timeline storage
 - React/Vite inbox UI
-- Dockerfiles and `docker-compose.yaml` for self-hosting
+- Single app container image plus optional local infra Compose override
 
 ## Structure
 
@@ -46,7 +46,7 @@ copy apps\web\.env.example apps\web\.env
 3. Start PostgreSQL and create Prisma tables:
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d postgres
 npx prisma generate
 npx prisma migrate dev --name init
 ```
@@ -58,6 +58,35 @@ npm run dev
 ```
 
 5. Open the web app at [http://localhost:5173](http://localhost:5173)
+
+## Container deployment
+
+The default [docker-compose.yaml](C:/Users/safwa/whatflow%20inbox/docker-compose.yaml) runs only the Whatflow app container. This is the production-oriented mode and expects you to bring your own infrastructure through env vars:
+
+- `DATABASE_URL` for PostgreSQL
+- `REDIS_URL` for Redis
+- `OBJECT_STORAGE_*` for S3/MinIO/R2-style object storage
+
+For local all-in-one development, combine it with [docker-compose.local.yaml](C:/Users/safwa/whatflow%20inbox/docker-compose.local.yaml):
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.local.yaml up --build
+```
+
+That local override adds:
+
+- PostgreSQL
+- Redis
+- MinIO
+
+The production container image is built from the root [Dockerfile](C:/Users/safwa/whatflow%20inbox/Dockerfile), which bundles the API and built web app into a single deployable image.
+
+## GitHub Container Registry
+
+Publishing to GHCR is configured in [.github/workflows/publish-container.yml](C:/Users/safwa/whatflow%20inbox/.github/workflows/publish-container.yml). On pushes to `main` and version tags, it publishes:
+
+- `ghcr.io/<owner>/whatflow:latest`
+- branch, tag, and SHA-based tags
 
 ## Backend capabilities
 
@@ -100,6 +129,8 @@ This is deliberately closer to "WhatsApp inbox plus full API wrapper" than a gen
 
 - Data is stored in PostgreSQL through Prisma.
 - Prisma is configured through [prisma.config.ts](C:/Users/safwa/whatflow%20inbox/prisma.config.ts) and uses the newer adapter-based PostgreSQL client wiring.
+- The root container image serves both the API and the built web UI from the same process on port `3001`.
+- Redis and object storage are deployment-time optional dependencies; you can bring your own services or use the local Compose override.
 - The raw Meta proxy is the bridge to complete API coverage while the opinionated UI catches up.
 - The Chatwoot repo is kept only as a product/IA reference, not runtime code.
 - Embedded signup uses the Facebook JavaScript SDK on the frontend and a backend code exchange against Meta OAuth.
