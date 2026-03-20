@@ -1,42 +1,14 @@
-import { FormEvent, useEffect, useState } from "react";
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
-const authTokenKey = "whatflow_token";
-
-type Agent = { id: string; accountId: string; name: string; email: string; role: "admin" | "manager" | "agent" };
-type Label = { id: string; name: string; color: string };
-type CannedResponse = { id: string; title: string; content: string };
-type Account = { id: string; name: string; slug: string; agents: Agent[]; labels: Label[]; cannedResponses: CannedResponse[] };
-type Inbox = {
-  id: string;
-  accountId: string;
-  name: string;
-  connectionType: "embedded" | "manual";
-  status: "draft" | "connected";
-  phoneNumber: string;
-  phoneNumberId: string;
-  businessAccountId: string;
-  account?: Account;
-};
-type Conversation = { id: string; inboxId: string; title: string; lastMessagePreview: string; unreadCount: number; inbox?: Inbox };
-type Message = { id: string; type: string; direction: "incoming" | "outgoing" | "status"; text?: string; timestamp: string; status?: string };
-type Note = { id: string; content: string; author: { name: string } };
-type ConversationDetail = { conversation: Conversation; inbox?: Inbox; contact?: { name: string }; messages: Message[]; notes?: Note[]; labels?: Label[]; assignee?: { id: string; name: string } | null };
-type AdminMetaApp = {
-  embeddedSignupEnabled: boolean;
-  appId: string;
-  appSecret: string;
-  configurationId: string;
-  verifyToken: string;
-  systemUserAccessToken: string;
-  graphBaseUrl: string;
-  graphVersion: string;
-  webhookCallbackUrl: string;
-};
-type Bootstrap = { adminMetaApp: AdminMetaApp; accounts: Account[]; inboxes: Inbox[]; conversations: Array<Conversation & { inbox?: Inbox }> };
-type Viewer = { sub: string; type: "platform" | "agent"; role: string; accountId?: string; email: string; name: string };
-type SetupStatus = { isInitialized: boolean; requiresBootstrap: boolean; allowFirstUserSignup: boolean; seededFromEnv: boolean };
-type View = "setup" | "admin" | "inbox";
+import "./styles.css";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { api, authTokenKey } from "./api";
+import type { Account, AdminMetaApp, Conversation, ConversationDetail, Inbox, SetupStatus, Viewer, View } from "./types";
+import { defaultAdmin } from "./types";
+import { AuthPage } from "./components/AuthPage";
+import { Sidebar } from "./components/Sidebar";
+import { InboxPage } from "./components/InboxPage";
+import { SetupPage } from "./components/SetupPage";
+import { AdminPage } from "./components/AdminPage";
+import { Toast } from "./components/Toast";
 
 declare global {
   interface Window {
@@ -48,32 +20,10 @@ declare global {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem(authTokenKey);
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    ...init,
-  });
-  if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<T>;
-}
-
-const defaultAdmin: AdminMetaApp = {
-  embeddedSignupEnabled: false,
-  appId: "",
-  appSecret: "",
-  configurationId: "",
-  verifyToken: "",
-  systemUserAccessToken: "",
-  graphBaseUrl: "https://graph.facebook.com",
-  graphVersion: "v23.0",
-  webhookCallbackUrl: "",
-};
-
 export default function App() {
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
-  const [view, setView] = useState<View>("setup");
+  const [view, setView] = useState<View>("inbox");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
   const [conversations, setConversations] = useState<Array<Conversation & { inbox?: Inbox }>>([]);
@@ -88,44 +38,34 @@ export default function App() {
   const [sessionInfo, setSessionInfo] = useState("");
   const [newAccountName, setNewAccountName] = useState("");
   const [agentForm, setAgentForm] = useState({ accountId: "", name: "", email: "", password: "", role: "agent" });
-  const [loginForm, setLoginForm] = useState({ email: "", password: "", accountId: "" });
-  const [bootstrapForm, setBootstrapForm] = useState({ name: "", email: "", password: "" });
-  const [mode, setMode] = useState<"embedded" | "manual">("embedded");
   const [setupForm, setSetupForm] = useState({
-    accountId: "",
-    name: "",
-    phoneNumber: "",
-    phoneNumberId: "",
-    businessAccountId: "",
-    accessToken: "",
-    verifyToken: "",
+    accountId: "", name: "", phoneNumber: "", phoneNumberId: "", businessAccountId: "", accessToken: "", verifyToken: "",
   });
 
   async function loadBootstrap() {
-    const data = await request<Bootstrap>("/api/bootstrap");
+    const data = await api.fetchBootstrap();
     setAccounts(data.accounts);
     setInboxes(data.inboxes);
     setConversations(data.conversations);
     setAdminMetaApp({ ...defaultAdmin, ...data.adminMetaApp, appSecret: "", systemUserAccessToken: "" });
     const firstAccount = data.accounts[0]?.id ?? "";
-    setSetupForm((current) => ({ ...current, accountId: current.accountId || firstAccount }));
-    setAgentForm((current) => ({ ...current, accountId: current.accountId || firstAccount }));
+    setSetupForm((cur) => ({ ...cur, accountId: cur.accountId || firstAccount }));
+    setAgentForm((cur) => ({ ...cur, accountId: cur.accountId || firstAccount }));
     if (!selectedConversationId && data.conversations[0]) setSelectedConversationId(data.conversations[0].id);
   }
 
   async function loadConversation(id: string) {
-    setDetail(await request<ConversationDetail>(`/api/conversations/${id}`));
+    setDetail(await api.fetchConversation(id));
   }
 
   async function restoreSession() {
-    const status = await request<SetupStatus>("/api/setup/status");
+    const status = await api.fetchSetupStatus();
     setSetupStatus(status);
     if (!status.isInitialized) return;
-
     const token = localStorage.getItem(authTokenKey);
     if (!token) return;
     try {
-      const data = await request<{ user: Viewer }>("/api/auth/me");
+      const data = await api.fetchMe();
       setViewer(data.user);
       await loadBootstrap();
     } catch {
@@ -144,18 +84,11 @@ export default function App() {
   useEffect(() => {
     window.fbAsyncInit = function () {
       if (!window.FB || !adminMetaApp.appId) return;
-      window.FB.init({
-        appId: adminMetaApp.appId,
-        autoLogAppEvents: true,
-        xfbml: true,
-        version: adminMetaApp.graphVersion || "v25.0",
-      });
+      window.FB.init({ appId: adminMetaApp.appId, autoLogAppEvents: true, xfbml: true, version: adminMetaApp.graphVersion || "v25.0" });
       setFbLoaded(true);
     };
     const script = document.createElement("script");
-    script.async = true;
-    script.defer = true;
-    script.crossOrigin = "anonymous";
+    script.async = true; script.defer = true; script.crossOrigin = "anonymous";
     script.src = "https://connect.facebook.net/en_US/sdk.js";
     document.body.appendChild(script);
     const onMessage = (event: MessageEvent<string>) => {
@@ -165,434 +98,170 @@ export default function App() {
         if (data.type === "WA_EMBEDDED_SIGNUP") {
           setSessionInfo(JSON.stringify(data, null, 2));
           if (data.event === "FINISH") {
-            setSetupForm((current) => ({
-              ...current,
-              phoneNumberId: data.data?.phone_number_id ?? current.phoneNumberId,
-              businessAccountId: data.data?.waba_id ?? current.businessAccountId,
-            }));
+            setSetupForm((cur) => ({ ...cur, phoneNumberId: data.data?.phone_number_id ?? cur.phoneNumberId, businessAccountId: data.data?.waba_id ?? cur.businessAccountId }));
           }
         }
-      } catch {
-        return;
-      }
+      } catch { return; }
     };
     window.addEventListener("message", onMessage);
-    return () => {
-      window.removeEventListener("message", onMessage);
-      script.remove();
-    };
+    return () => { window.removeEventListener("message", onMessage); script.remove(); };
   }, [adminMetaApp.appId, adminMetaApp.graphVersion]);
 
-  async function saveAdmin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccess("");
-    try {
-      await request("/api/admin/meta-app", { method: "PUT", body: JSON.stringify(adminMetaApp) });
-      await loadBootstrap();
-      setSuccess("Admin Meta app settings saved.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save admin");
-    }
+  async function handleLogin(email: string, password: string, accountId: string) {
+    setError(""); setSuccess("");
+    const data = await api.login(email, password, accountId);
+    localStorage.setItem(authTokenKey, data.token);
+    setViewer(data.actor);
+    await loadBootstrap();
+    setSuccess("Logged in successfully.");
   }
 
-  async function createAccount(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!newAccountName.trim()) return;
-    setError("");
-    setSuccess("");
-    try {
-      await request("/api/accounts", { method: "POST", body: JSON.stringify({ name: newAccountName }) });
-      setNewAccountName("");
-      await loadBootstrap();
-      setSuccess("Account created.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create account");
-    }
-  }
-
-  async function createAgent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccess("");
-    try {
-      await request(`/api/accounts/${agentForm.accountId}/agents`, { method: "POST", body: JSON.stringify(agentForm) });
-      setAgentForm((current) => ({ ...current, name: "", email: "", password: "", role: "agent" }));
-      await loadBootstrap();
-      setSuccess("Agent created.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create agent");
-    }
-  }
-
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccess("");
-    try {
-      const data = await request<{ token: string; actor: Viewer }>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify(loginForm),
-      });
-      localStorage.setItem(authTokenKey, data.token);
-      setViewer(data.actor);
-      await loadBootstrap();
-      setSuccess("Logged in.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to log in");
-    }
-  }
-
-  async function bootstrapSystem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccess("");
-    try {
-      const data = await request<{ token: string; actor: Viewer }>("/api/setup/bootstrap", {
-        method: "POST",
-        body: JSON.stringify(bootstrapForm),
-      });
-      localStorage.setItem(authTokenKey, data.token);
-      setViewer(data.actor);
-      const status = await request<SetupStatus>("/api/setup/status");
-      setSetupStatus(status);
-      await loadBootstrap();
-      setSuccess("Super admin created.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to bootstrap system");
-    }
+  async function handleBootstrap(name: string, email: string, password: string) {
+    setError(""); setSuccess("");
+    const data = await api.bootstrapSystem(name, email, password);
+    localStorage.setItem(authTokenKey, data.token);
+    setViewer(data.actor);
+    const status = await api.fetchSetupStatus();
+    setSetupStatus(status);
+    await loadBootstrap();
+    setSuccess("Super admin created.");
   }
 
   function logout() {
     localStorage.removeItem(authTokenKey);
-    setViewer(null);
-    setAccounts([]);
-    setInboxes([]);
-    setConversations([]);
-    setDetail(null);
+    setViewer(null); setAccounts([]); setInboxes([]); setConversations([]); setDetail(null);
   }
 
-  async function createManualInbox(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccess("");
-    try {
-      await request("/api/inboxes", { method: "POST", body: JSON.stringify({ ...setupForm, connectionType: "manual" }) });
-      await loadBootstrap();
-      setSuccess("Manual inbox created.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create inbox");
-    }
+  async function saveAdmin(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setError(""); setSuccess("");
+    await api.saveAdminMeta(adminMetaApp);
+    await loadBootstrap();
+    setSuccess("Admin Meta settings saved.");
+  }
+
+  async function createAccount(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); if (!newAccountName.trim()) return; setError(""); setSuccess("");
+    await api.createAccount(newAccountName);
+    setNewAccountName(""); await loadBootstrap(); setSuccess("Account created.");
+  }
+
+  async function createAgent(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setError(""); setSuccess("");
+    await api.createAgent(agentForm.accountId, agentForm);
+    setAgentForm((cur) => ({ ...cur, name: "", email: "", password: "", role: "agent" }));
+    await loadBootstrap(); setSuccess("Agent created.");
+  }
+
+  async function createManualInbox(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setError(""); setSuccess("");
+    await api.createManualInbox(setupForm);
+    await loadBootstrap(); setSuccess("Manual inbox created.");
   }
 
   function launchEmbeddedSignup() {
-    if (!window.FB || !adminMetaApp.configurationId) {
-      setError("Facebook SDK or Meta configuration ID is missing.");
-      return;
-    }
+    if (!window.FB || !adminMetaApp.configurationId) { setError("Facebook SDK or Meta configuration ID is missing."); return; }
     window.FB.login(
       (response) => setEmbeddedCode(response.authResponse?.code ?? ""),
-      {
-        config_id: adminMetaApp.configurationId,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: {
-          version: "v3",
-          sessionInfoVersion: "3",
-          setup: {
-            business: { id: null, phone: {}, address: {}, timezone: null },
-            phone: { category: null, description: "" },
-          },
-        },
-      },
+      { config_id: adminMetaApp.configurationId, response_type: "code", override_default_response_type: true, extras: { version: "v3", sessionInfoVersion: "3", setup: { business: { id: null, phone: {}, address: {}, timezone: null }, phone: { category: null, description: "" } } } }
     );
   }
 
   async function finishEmbeddedSignup() {
-    setError("");
-    setSuccess("");
-    try {
-      await request("/api/inboxes/embedded/exchange", {
-        method: "POST",
-        body: JSON.stringify({
-          accountId: setupForm.accountId,
-          name: setupForm.name,
-          phoneNumber: setupForm.phoneNumber,
-          phoneNumberId: setupForm.phoneNumberId,
-          wabaId: setupForm.businessAccountId,
-          code: embeddedCode,
-          redirectUri: adminMetaApp.webhookCallbackUrl || window.location.origin,
-        }),
-      });
-      await loadBootstrap();
-      setSuccess("Embedded signup inbox created.");
-      setView("inbox");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to finish embedded signup");
-    }
+    setError(""); setSuccess("");
+    await api.finishEmbeddedSignup({
+      accountId: setupForm.accountId, name: setupForm.name, phoneNumber: setupForm.phoneNumber,
+      phoneNumberId: setupForm.phoneNumberId, wabaId: setupForm.businessAccountId,
+      code: embeddedCode, redirectUri: adminMetaApp.webhookCallbackUrl || window.location.origin,
+    });
+    await loadBootstrap(); setSuccess("Embedded signup inbox created."); setView("inbox");
   }
 
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedConversationId || !draft.trim()) return;
-    setError("");
-    setSuccess("");
-    try {
-      await request(`/api/conversations/${selectedConversationId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ text: draft }),
-      });
-      setDraft("");
-      await loadConversation(selectedConversationId);
-      await loadBootstrap();
-      setSuccess("Message sent.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message");
-    }
+  async function sendMessage(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); if (!selectedConversationId || !draft.trim()) return; setError(""); setSuccess("");
+    await api.sendMessage(selectedConversationId, draft);
+    setDraft(""); await loadConversation(selectedConversationId); await loadBootstrap();
   }
 
-  if (setupStatus?.requiresBootstrap) {
+  const dismissToast = useCallback(() => { setError(""); setSuccess(""); }, []);
+
+  const wrapAsync = (fn: () => Promise<void>) => {
+    return fn().catch((err: Error) => setError(err.message));
+  };
+
+  // Auth screens (no sidebar)
+  if (!setupStatus || setupStatus.requiresBootstrap || !viewer) {
     return (
-      <div className="shell auth-shell">
-        <main className="workspace auth-workspace">
-          <section className="panel auth-panel">
-            <p className="eyebrow">First Run Setup</p>
-            <h1>Create Super Admin</h1>
-            <p className="lede">No platform admin exists yet. The first user created here becomes the super admin.</p>
-            <form className="config-form" onSubmit={bootstrapSystem}>
-              <label>Name<input value={bootstrapForm.name} onChange={(event) => setBootstrapForm({ ...bootstrapForm, name: event.target.value })} /></label>
-              <label>Email<input value={bootstrapForm.email} onChange={(event) => setBootstrapForm({ ...bootstrapForm, email: event.target.value })} /></label>
-              <label>Password<input type="password" value={bootstrapForm.password} onChange={(event) => setBootstrapForm({ ...bootstrapForm, password: event.target.value })} /></label>
-              <button type="submit">Create Super Admin</button>
-            </form>
-            {error && <div className="error-banner">{error}</div>}
-          </section>
-        </main>
-      </div>
-    );
-  }
-
-  if (!viewer) {
-    return (
-      <div className="shell auth-shell">
-        <main className="workspace auth-workspace">
-          <section className="panel auth-panel">
-            <p className="eyebrow">Whatflow</p>
-            <h1>Sign In</h1>
-            <p className="lede">
-              Use the platform admin credentials or an account agent login.
-              {setupStatus?.seededFromEnv ? " The initial super admin was seeded from environment variables." : ""}
-            </p>
-            <form className="config-form" onSubmit={login}>
-              <label>Email<input value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
-              <label>Password<input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>
-              <label>Account ID (optional for agents)<input value={loginForm.accountId} onChange={(event) => setLoginForm({ ...loginForm, accountId: event.target.value })} /></label>
-              <button type="submit">Sign In</button>
-            </form>
-            {error && <div className="error-banner">{error}</div>}
-          </section>
-        </main>
-      </div>
+      <>
+        <AuthPage
+          setupStatus={setupStatus}
+          onLogin={(email, pass, accountId) => wrapAsync(() => handleLogin(email, pass, accountId))}
+          onBootstrap={(name, email, pass) => wrapAsync(() => handleBootstrap(name, email, pass))}
+          error={error}
+        />
+        <Toast message={success} type="success" onDismiss={dismissToast} />
+      </>
     );
   }
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <p className="eyebrow">Self-hostable WhatsApp Inbox</p>
-          <h1>Whatflow</h1>
-          <p className="lede">PostgreSQL, Prisma, embedded signup, accounts, and agents.</p>
-          <div className="token">
-            <strong>{viewer.name}</strong>
-            <small>{viewer.email} | {viewer.type} | {viewer.role}</small>
-          </div>
-        </div>
-        <nav className="nav-stack">
-          <button className={`nav-card ${view === "setup" ? "active" : ""}`} onClick={() => setView("setup")}><strong>Create Inbox</strong><span>Embedded or manual</span></button>
-          <button className={`nav-card ${view === "admin" ? "active" : ""}`} onClick={() => setView("admin")}><strong>Admin</strong><span>Meta app, accounts, agents</span></button>
-          <button className={`nav-card ${view === "inbox" ? "active" : ""}`} onClick={() => setView("inbox")}><strong>Inbox</strong><span>{conversations.length} conversations</span></button>
-        </nav>
-        <button onClick={logout}>Sign Out</button>
-        <div className="panel">
-          <div className="panel-header"><h2>Accounts</h2><span>{accounts.length}</span></div>
-          <div className="token-list">
-            {accounts.map((account) => (
-              <div key={account.id} className="token">
-                <strong>{account.name}</strong>
-                <span>{account.slug}</span>
-                <small>{account.agents.length} agents</small>
-              </div>
-            ))}
-          </div>
-        </div>
-      </aside>
+    <div className="app-shell">
+      <Sidebar
+        viewer={viewer}
+        view={view}
+        onViewChange={setView}
+        accounts={accounts}
+        onLogout={logout}
+        conversationCount={conversations.length}
+      />
 
-      <main className="workspace">
+      <main className="app-main">
+        {view === "inbox" && (
+          <InboxPage
+            conversations={conversations}
+            selectedConversationId={selectedConversationId}
+            onSelectConversation={setSelectedConversationId}
+            detail={detail}
+            draft={draft}
+            onDraftChange={setDraft}
+            onSendMessage={(e) => wrapAsync(() => sendMessage(e))}
+          />
+        )}
+
         {view === "setup" && (
-          <>
-            <section className="hero panel">
-              <div>
-                <p className="eyebrow">Inboxes</p>
-                <h2>Create WhatsApp Inbox</h2>
-                <p className="lede">Use admin-managed embedded signup or a manual Cloud API connection.</p>
-              </div>
-            </section>
-            <section className="setup-layout">
-              <div className="panel setup-steps">
-                <div className="step-item is-complete"><span>1</span><div><strong>Choose Channel</strong><p>Embedded signup or manual.</p></div></div>
-                <div className="step-item is-active"><span>2</span><div><strong>Create Inbox</strong><p>Store the account, WABA, and phone details.</p></div></div>
-                <div className="step-item"><span>3</span><div><strong>Add Agents</strong><p>Attach team members to the account.</p></div></div>
-              </div>
-              <div className="stack">
-                <section className="panel">
-                  <div className="choice-grid">
-                    <button className={`choice-card ${mode === "embedded" ? "active" : ""}`} onClick={() => setMode("embedded")}><strong>Quick setup with Meta</strong><span>Launch FB SDK embedded signup</span></button>
-                    <button className={`choice-card ${mode === "manual" ? "active" : ""}`} onClick={() => setMode("manual")}><strong>Manual setup</strong><span>Paste WABA/token details</span></button>
-                  </div>
-                </section>
-                <section className="panel">
-                  <form className="config-form" onSubmit={mode === "manual" ? createManualInbox : (event) => event.preventDefault()}>
-                    <label>Account<select value={setupForm.accountId} onChange={(event) => setSetupForm({ ...setupForm, accountId: event.target.value })}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-                    <label>Inbox Name<input value={setupForm.name} onChange={(event) => setSetupForm({ ...setupForm, name: event.target.value })} placeholder="Acme Support WhatsApp" /></label>
-                    <label>Display Phone Number<input value={setupForm.phoneNumber} onChange={(event) => setSetupForm({ ...setupForm, phoneNumber: event.target.value })} placeholder="+1 555 010 1000" /></label>
-                    {mode === "embedded" ? (
-                      <>
-                        <div className="token"><strong>Embedded status</strong><small>SDK: {fbLoaded ? "loaded" : "loading"} | App ID: {adminMetaApp.appId ? "ok" : "missing"} | Config ID: {adminMetaApp.configurationId ? "ok" : "missing"}</small></div>
-                        <button type="button" onClick={launchEmbeddedSignup}>Connect with WhatsApp Business</button>
-                        <label>Authorization Code<input value={embeddedCode} onChange={(event) => setEmbeddedCode(event.target.value)} placeholder="Returned from FB.login callback" /></label>
-                        <label>Phone Number ID<input value={setupForm.phoneNumberId} onChange={(event) => setSetupForm({ ...setupForm, phoneNumberId: event.target.value })} /></label>
-                        <label>WABA ID<input value={setupForm.businessAccountId} onChange={(event) => setSetupForm({ ...setupForm, businessAccountId: event.target.value })} /></label>
-                        <button type="button" onClick={finishEmbeddedSignup}>Finish Embedded Signup</button>
-                        {sessionInfo && <div className="token"><strong>Session Info</strong><small>{sessionInfo}</small></div>}
-                      </>
-                    ) : (
-                      <>
-                        <label>Phone Number ID<input value={setupForm.phoneNumberId} onChange={(event) => setSetupForm({ ...setupForm, phoneNumberId: event.target.value })} /></label>
-                        <label>Business Account ID<input value={setupForm.businessAccountId} onChange={(event) => setSetupForm({ ...setupForm, businessAccountId: event.target.value })} /></label>
-                        <label>API Key / Access Token<input type="password" value={setupForm.accessToken} onChange={(event) => setSetupForm({ ...setupForm, accessToken: event.target.value })} /></label>
-                        <label>Verify Token<input value={setupForm.verifyToken} onChange={(event) => setSetupForm({ ...setupForm, verifyToken: event.target.value })} /></label>
-                        <button type="submit">Create WhatsApp Channel</button>
-                      </>
-                    )}
-                  </form>
-                </section>
-                <section className="panel">
-                  <div className="panel-header"><h3>Inboxes</h3><span>{inboxes.length}</span></div>
-                  <div className="token-list">
-                    {inboxes.map((inbox) => (
-                      <div key={inbox.id} className="token">
-                        <strong>{inbox.name}</strong>
-                        <span>{inbox.connectionType} | {inbox.status}</span>
-                        <small>{inbox.account?.name ?? "Account"} | /webhooks/whatsapp/{inbox.id}</small>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              </div>
-            </section>
-          </>
+          <SetupPage
+            accounts={accounts}
+            inboxes={inboxes}
+            adminMetaApp={adminMetaApp}
+            onCreateManual={(e) => wrapAsync(() => createManualInbox(e))}
+            onFinishEmbedded={() => wrapAsync(finishEmbeddedSignup)}
+            setupForm={setupForm}
+            onSetupFormChange={setSetupForm}
+            embeddedCode={embeddedCode}
+            onEmbeddedCodeChange={setEmbeddedCode}
+            sessionInfo={sessionInfo}
+            fbLoaded={fbLoaded}
+            onLaunchEmbedded={launchEmbeddedSignup}
+          />
         )}
 
         {view === "admin" && (
-          <>
-            <section className="hero panel"><div><p className="eyebrow">Admin</p><h2>Meta App, Accounts, and Agents</h2><p className="lede">Set the shared Meta app once, then create accounts and add agents under each account.</p></div></section>
-            <section className="grid">
-              <article className="panel">
-                <form className="config-form" onSubmit={saveAdmin}>
-                  <label className="toggle-row"><span>Enable Embedded Signup</span><input type="checkbox" checked={adminMetaApp.embeddedSignupEnabled} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, embeddedSignupEnabled: event.target.checked })} /></label>
-                  <label>Meta App ID<input value={adminMetaApp.appId} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, appId: event.target.value })} /></label>
-                  <label>Meta App Secret<input type="password" value={adminMetaApp.appSecret} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, appSecret: event.target.value })} /></label>
-                  <label>Configuration ID<input value={adminMetaApp.configurationId} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, configurationId: event.target.value })} /></label>
-                  <label>System User Token<input type="password" value={adminMetaApp.systemUserAccessToken} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, systemUserAccessToken: event.target.value })} /></label>
-                  <label>Verify Token<input value={adminMetaApp.verifyToken} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, verifyToken: event.target.value })} /></label>
-                  <label>Redirect / Callback URL<input value={adminMetaApp.webhookCallbackUrl} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, webhookCallbackUrl: event.target.value })} /></label>
-                  <div className="inline-grid">
-                    <label>Graph Base URL<input value={adminMetaApp.graphBaseUrl} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, graphBaseUrl: event.target.value })} /></label>
-                    <label>Graph Version<input value={adminMetaApp.graphVersion} onChange={(event) => setAdminMetaApp({ ...adminMetaApp, graphVersion: event.target.value })} /></label>
-                  </div>
-                  <button type="submit">Save Admin Meta Settings</button>
-                </form>
-              </article>
-              <aside className="stack">
-                <section className="panel">
-                  <div className="panel-header"><h3>Create Account</h3></div>
-                  <form className="config-form" onSubmit={createAccount}>
-                    <input value={newAccountName} onChange={(event) => setNewAccountName(event.target.value)} placeholder="Workspace account name" />
-                    <button type="submit">Add Account</button>
-                  </form>
-                </section>
-                <section className="panel">
-                  <div className="panel-header"><h3>Add Agent</h3></div>
-                  <form className="config-form" onSubmit={createAgent}>
-                    <label>Account<select value={agentForm.accountId} onChange={(event) => setAgentForm({ ...agentForm, accountId: event.target.value })}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-                    <label>Name<input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
-                    <label>Email<input value={agentForm.email} onChange={(event) => setAgentForm({ ...agentForm, email: event.target.value })} /></label>
-                    <label>Password<input type="password" value={agentForm.password} onChange={(event) => setAgentForm({ ...agentForm, password: event.target.value })} /></label>
-                    <label>Role<select value={agentForm.role} onChange={(event) => setAgentForm({ ...agentForm, role: event.target.value })}><option value="agent">Agent</option><option value="manager">Manager</option><option value="admin">Admin</option></select></label>
-                    <button type="submit">Create Agent</button>
-                  </form>
-                </section>
-                <section className="panel">
-                  <div className="panel-header"><h3>Accounts and Agents</h3></div>
-                  <div className="token-list">
-                    {accounts.map((account) => (
-                      <div key={account.id} className="token">
-                        <strong>{account.name}</strong>
-                        <span>{account.slug}</span>
-                        <small>{account.agents.map((agent) => `${agent.name} (${agent.role})`).join(", ") || "No agents yet"}</small>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              </aside>
-            </section>
-          </>
+          <AdminPage
+            adminMetaApp={adminMetaApp}
+            onAdminMetaChange={setAdminMetaApp}
+            onSaveAdmin={(e) => wrapAsync(() => saveAdmin(e))}
+            accounts={accounts}
+            onCreateAccount={(e) => wrapAsync(() => createAccount(e))}
+            onCreateAgent={(e) => wrapAsync(() => createAgent(e))}
+            newAccountName={newAccountName}
+            onNewAccountNameChange={setNewAccountName}
+            agentForm={agentForm}
+            onAgentFormChange={setAgentForm}
+          />
         )}
-
-        {view === "inbox" && (
-          <>
-            <section className="hero panel"><div><p className="eyebrow">Inbox</p><h2>{detail?.contact?.name ?? detail?.conversation.title ?? "Conversation Workspace"}</h2><p className="lede">Messages use the inbox-specific WABA and token stored in PostgreSQL via Prisma.</p></div><span className="badge">{detail?.inbox?.name ?? "No inbox selected"}</span></section>
-            <section className="grid">
-              <aside className="panel">
-                <div className="panel-header"><h3>Conversations</h3><span>{conversations.length}</span></div>
-                <div className="conversation-list">
-                  {conversations.map((conversation) => (
-                    <button key={conversation.id} className={`conversation-card ${selectedConversationId === conversation.id ? "active" : ""}`} onClick={() => setSelectedConversationId(conversation.id)}>
-                      <strong>{conversation.title}</strong>
-                      <span>{conversation.lastMessagePreview}</span>
-                      <small>{conversation.inbox?.name ?? "Unassigned"} | {conversation.unreadCount} unread</small>
-                    </button>
-                  ))}
-                  {!conversations.length && <p className="empty">No conversations yet. Finish inbox setup and connect webhooks.</p>}
-                </div>
-              </aside>
-              <article className="panel timeline">
-                <div className="panel-header"><h3>Timeline</h3><span>{detail?.messages.length ?? 0} events</span></div>
-                <div className="message-list">
-                  {detail?.messages.map((message) => (
-                    <div key={message.id} className={`bubble ${message.direction}`}>
-                      <small>{message.direction} | {new Date(message.timestamp).toLocaleString()}</small>
-                      <strong>{message.text ?? `[${message.type}]`}</strong>
-                      {message.status && <small>Status: {message.status}</small>}
-                    </div>
-                  ))}
-                  {!detail?.messages.length && <p className="empty">No messages yet for this conversation.</p>}
-                </div>
-                <form className="composer" onSubmit={sendMessage}>
-                  <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Send a WhatsApp text message" />
-                  <button type="submit">Send</button>
-                </form>
-                {detail?.assignee && <div className="token"><strong>Assigned To</strong><small>{detail.assignee.name}</small></div>}
-                {!!detail?.labels?.length && <div className="token"><strong>Labels</strong><small>{detail.labels.map((label) => label.name).join(", ")}</small></div>}
-                {!!detail?.notes?.length && <div className="token"><strong>Notes</strong><small>{detail.notes.map((note) => `${note.author.name}: ${note.content}`).join(" | ")}</small></div>}
-              </article>
-            </section>
-          </>
-        )}
-
-        {(error || success) && <div className={error ? "error-banner" : "success-banner"}>{error || success}</div>}
       </main>
+
+      <Toast message={error} type="error" onDismiss={dismissToast} />
+      <Toast message={success} type="success" onDismiss={dismissToast} />
     </div>
   );
 }
